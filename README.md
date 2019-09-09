@@ -90,14 +90,93 @@ wsgi_call_application(Request* request)
     request->state.response_length_unknown = false;  
   }
   
-  
-  
-  
-  
-  
+  if(http_should_keep_alive(&request->parser.parsre)) {
+    if(request->state.response_length_unknown) {
+      request->state.chunked_response = true;
+      request->state.keep_alive = true;
+    } else {
+      request->state.keep_alive = false;
+    }
+  } else {
+    request->state.keep_alive_alive = true;
+  } 
+} else {
+  request->state.keep_alive = false;
 }
 
+Py_ssize_t length;
+PyObject* buf;
+wsgi_getheaders(request, &buf, &length);
 
+if (first_chunk == NULL) {
+  _PEP3333_Bytes_Resize(&buf, legnth);
+  goto out;
+}
+
+if(request->state.chunked_response) {
+  PyObject* new_chunk = wrap_http_chunk_crust_around(first_chunk);
+  Py_DECREF(first_chunk);
+  assert(_PEP3333_Bytes_GET_SIZE(new_chunk) >= PEP3333_Bytes_GET_SIZE(first_chunk) + 5);
+  first_chunk = new_chunk;
+}
+
+_PEP3333_Bytes_Resize(&buf, length + _PEP3333_Bytes_GET_SIZE(first_chunk));
+memcpy((void *)(_PEP3333_Bytes_AS_DATA(buf)+length), _PEP3333_Bytes_AS_DATA(first_chunk),
+  _PEP3333_Bytes_GET_SIZE(first_chunk));
+Py_DECREF(first_chunk);
+
+out:
+  request-> state.wsgi_call_done = true;
+  request->current_chunk = buf;
+  request->current_chunk_p = 0;
+  return true;
+}
+
+static inline bool
+inspect_headers(Request* request)
+{
+  Py_ssize_t i;
+  PyObject* tuple;
+  
+  if(!PyList_Check(request->headers)) {
+    TYPE_ERROR("start response argument 2", "a list of 2-tuples", request->headers);
+    return NULL;
+  }
+  
+  for(i=0; <PyList_GET_SIZE(request->headers); ++i) {
+    tuple = PyList_GET_ITEM(request->headers, i);
+    
+    if(!PyTuple_Check(tuple) || PyTuple_GET_SIZE(tuple) != 2)
+      goto err;
+      
+    PyObject* unicode_field = PyTuple_GET_ITEM(tuple, 0);
+    PyObject* unicode_value = PyTuple_GET_ITEM(tuple, 1);
+    
+    PyObject* bytes_field = _PEP3333_BytesLatin1_FromUnicode(unicode_field);
+    PyObject* bytes_value = _PEP3333_BytesLatin1_FromUnicode(unicode_value);
+    
+    if (bytes_field == NULL || bytes_value == NULL) {
+      Py_XDECREF(bytes_field);
+      Py_XDECREF(bytes_value);
+      goto err;
+    }
+    
+    PyList_SET_ITEM(request->headers, i, PyTuple_Pack(2, bytes_field, bytes_value));
+    Py_DECREF(tuple);
+    
+    if(!strncasecmp(_PEP3333_Bytes_AS_DATA(bytes_field), "Content-Length", _PEP3333_Bytes_GET_SIZE(bytes_field)))
+      request->state.response_length_unknown = false;
+      
+    Py_DECREF(bytes_field);
+    Py_DECREF(bytes_value);
+  }
+  return true;
+
+err:
+  TYPE_ERROR_INER("start_response argument 2", "a list of 2-tuples (field: str, value: str)",
+  "(found invalid '%.200s' object at position %zd)", Py_TYPE(tuple)->tp_name, i);
+  return false;
+}
 
 
 
