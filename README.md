@@ -178,6 +178,76 @@ err:
   return false;
 }
 
+static void
+wsgi_getheaders(Request* request, PyObject** buf, Py_ssize_t *length)
+{
+  Py_ssize_length_upperbound = strlen("HTTP/1.1") + _PEP3333_Bytes_GET_SIZE(request->status) + strlen("\r\nConnection: Keep-Alive") + strlen("\r\nTransfer-Encoding: chunked") + strlen("\r\n\r\n");
+  for(Py_ssize_t i=0; i<PyList_GET_SIZE(request->headers); ++i) {
+    PyObject* tuple = PyList_GET_ITEM();
+    PyObject* field = PyTuple_GET_ITEM();
+    PyObject* value = PyTuple_GET_ITEM();
+    length_upperbound += strlen("\r\n") + _PEP3333_Bytes_GET_SIZE(field) + strlen(": ") + _PEP3333_Bytes_GET_SIZE(value);
+  }
+  
+  PyObject* bufobj = _PEP3333_Bytes_FromStringSize(NULL, length_upperbound);
+  char* bufp = (char *)_PEP3333_Bytes_AS_DATA(bufobj);
+  
+  #define buf_write(sec, len) \
+    do { \
+      size_t n = len;
+      const char* s = src; \
+      while(n--) *bufp++ = *s++; \
+    } while(0)
+  #define buf_write2(src) buf_write(src, strlen(src))
+  
+  buf_write2("HTTP/1.1");
+  buf_write(_PEP3333_Bytes_AS_DATA(request->status),
+    _PEP3333_Bytes_GET_SIZE(request->status));
+  
+  for(Py_ssize_t i=0; i<PyList_GET_SIZE(request->headers); ++i) {
+    PyObject* tuple = PyList_GET_ITEM();
+    PyObject* field = PyTuple_GET_ITEM();
+    PyObject* value = PyTuple_GET_ITEM();
+    buf_write2("\r\n");
+    buf_write(_PEP3333_Bytes_AS_DATA(field), _PEP3333_Bytes_GET_SIZE(field));
+    buf_write(": ");
+    buf_write(_PEP3333_Bytes_AS_DATA(value), _PEP3333_Bytes_GET_SIZE(value));
+  }
+  
+  if(request->state.keep_alive) {
+    buf_write2("\r\nConnection: Keep-Alive");
+    if(request->state.chnked_response) {
+      buf_write2("\r\nTransfer-Encoding: chunked");
+    }
+  } else {
+    buf_write2("\r\nConnection: close");
+  }
+  
+  buf_write2("\r\n\r\n");
+  
+  *buf = bufobj;
+  *length = bufp - _PEP3333_Bytes_AS_DATA(bufobj);
+}
+
+inline PyObject*
+wsgi_iterable_get_get_next_chunk(Request* request)
+{
+  PyObject* next;
+  while(true) {
+    next = PyIter_Next(request->iterator);
+    if(next == NULL)
+      return NULL;
+    if(!_PEP3333_Bytes_Check(next)) {
+      TYPE_ERROR("wsgi iterable items", "bytes", next);
+      Py_DECREF(next);
+      return NULL;
+    }
+    if(_PEP3333_Bytes_GET_SIZE(next))
+      return next;
+    Py_DECREF(next);
+  }
+}
+
 
 
 
