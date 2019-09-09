@@ -248,13 +248,98 @@ wsgi_iterable_get_get_next_chunk(Request* request)
   }
 }
 
+static inline void
+restore_exception_tuple(PyObject* exc_info, bool incref_items)
+{
+  if(incref_items) {
+    Py_INCREF(request->status);
+    Py_INCREF(request->headers);
+    request->state.response_length_unknown = true;
+  }
+  
+  PyObject* exc_info = NULL;
+  PyObject* status_unicode = NULL;
+  if(!PyArg_UnpackTuple(args, "start_response", 2, 3, &status_unicode, &resquest->headers, &exc_info))
+    return NULL;
+    
+  if(exc_info && exc_info != PyNone) {
+    if(!PyTuple_Check(exc_info) || PyTuple_GET_SIZE(exc_info) != 3) {
+      TYPE_ERROR("start_response argument 3", "a 3-tuple", exc_info);
+      return NULL;
+    }
+    
+    restore_exception_tuple(exc_info, /* */ true);
+    
+    if(request->state.wsgi_call_done) {
+      return NULL;
+    }
+    
+    PyErr_Print();
+  }
+  else if(request->state.start_response_called) {
+    PyErr_SetString(PyExc_TypeError, "'start_response' called twice without "
+        "passing 'exc_info' the second time");
+    return NULL;
+  }
+  
+  request->status = _PEP3333_BytesLatin_FromUnicode(status_unicode);
+  if (request->status == NULL) {
+    return NULL;
+  } else if (_PEP3333_Bytes_GET_SIZE(request->status) < 3) {
+    PyErr_SetString(PyExc_ValueError, "'status' must be 3-digit");
+    Py_CLEAR(request->status);
+    return NULL;
+  }
+  
+  request->status = _PEP3333_BytesLatin1_FromUnicode(status_unicode);
+  if (request->status == NULL) {
+    return NULL;
+  } else if (_PEP3333_Bytes_GET_SIZE(request->status) < 3) {
+    PyErr_SetString(PyExc_ValueError, "'status' must be 3-digit");
+    Py_CLEAR(request->status);
+    return NULL;
+  }
+  
+  if(!inspect_headers(request)) {
+    request->headers = NULL;
+    return NULL;
+  }
+  
+  Py_INCREF(request->headers);
+  
+  request->state.start_response_caled = true;
+  
+  Py_RETURN_NONE;
+}
 
+PyTypeObject StartResponse_Type = {
+  PyVarObject_HEAD_INIT(NULL, 0)
+  "start_response", 
+  sizeof(StartREsponse),
+  0,
+  (destructor)PyObject_FREE,
+  0, 0, 0, 0, 0, 0, 0, 0, 0,
+  start_response
+};
 
+PyObject*
+wrap_http_chunk_cruft_around(PyObject* chunk)
+{
+  size_t chunklen = _PEP3333_Bytes_GET_SIZE(chunk);
+  assert(chunklen);
+  char buf[strlen("fffffff") + 2];
+  size_t n = sprintf(buf, "%x\r\n", (unsigned int)chunklen);
+  PyObject* new_chunk = _PEP3333_Bytes_FromStringAndSize(NULL, n + chunklen + 2);
+  char * new_chunk_p = (char *)_PEP3333_Bytes_AS_DATA(new_chunk);
+  memcpy(new_chunk_p, buf, n);
+  new_chunk_p += n;
+  memcpy(new_chunk_p, _PEP3333_Bytes_AS_DATA(chunk), chunklen);
+  new_chunk_p += chunklen;
+  *new_chunk_p++ = '\r'; *new_chunk_p = '\n';
+  assert(new_chunk_p == _PEP3333_Bytes_AS_DATA(new_chunk) + n + chunklen + 1);
+  return new_chunk;
 
-
-
-
-
+}
 ```
 
 ```
